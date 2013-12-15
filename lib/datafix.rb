@@ -16,15 +16,17 @@ class Datafix
     end
 
     private
+    def migration_name
+      @migration_name ||= self.name.camelize.split('::').tap(&:shift).join('::')
+    end
 
     def log_run(direction)
-      name = self.name.camelize.split('::').tap(&:shift).join('::')
-      puts "migrating #{name} #{direction}"
+      puts "migrating #{migration_name} #{direction}"
 
       execute(<<-SQL)
       INSERT INTO datafix_log
       (direction, script, timestamp)
-      VALUES ('#{direction}', '#{name.camelize}', NOW())
+      VALUES ('#{direction}', '#{migration_name.camelize}', NOW())
       SQL
     end
 
@@ -41,16 +43,18 @@ class Datafix
     end
 
     def archive_table(table_name)
+      new_table_name = [table_name, "datafix", migration_name].join("_").downcase
       log "Archive #{table_name} for Rollback" if self.respond_to?(:log)
-      execute "CREATE TABLE archived_#{table_name} ( LIKE #{table_name} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES )"
-      execute "INSERT INTO archived_#{table_name} SELECT * FROM #{table_name}"
+      execute("CREATE TABLE archived_#{new_table_name} LIKE #{table_name}")
+      execute "INSERT INTO archived_#{new_table_name} SELECT * FROM #{table_name}"
     end
 
-    def revert_archive_table(table_name)
+    def revert_archive_table(table_name, suffix=nil)
+      old_table_name = [table_name, "datafix", migration_name].join("_").downcase
       log "Move old #{table_name} back" if self.respond_to?(:log)
       execute "TRUNCATE TABLE #{table_name}"
-      execute "INSERT INTO #{table_name} SELECT * FROM archived_#{table_name}"
-      execute "DROP TABLE archived_#{table_name}"
+      execute "INSERT INTO #{table_name} SELECT * FROM archived_#{old_table_name}"
+      execute "DROP TABLE archived_#{old_table_name}"
     end
   end
 end
